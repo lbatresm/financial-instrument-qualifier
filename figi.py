@@ -1,11 +1,44 @@
+
 from dotenv import load_dotenv
 import os
 import json
-import urllib.request
-import urllib.parse
-import os
+import requests
 
 
 load_dotenv()
-OPEN_FIGI_API_KEY = os.getenv("OPEN_FIGI_API_KEY")
+OPENFIGI_API_KEY = os.getenv("OPEN_FIGI_API_KEY")
 OPENFIGI_BASE_URL = "https://api.openfigi.com"
+
+
+JsonType = None | int | str | bool | list["JsonType"] | dict[str, "JsonType"]
+
+
+def api_call(path: str, data: dict | None = None, method: str = "POST") -> JsonType:
+    """
+    Make an api call to `api.openfigi.com`.
+    
+    Args:
+        path (str): API endpoint, for example "search"
+        method (str, optional): HTTP request method. Defaults to "POST".
+        data (dict | None, optional): HTTP request data. Defaults to None.
+
+    Returns:
+        JsonType: Response of the api call parsed as a JSON object
+    """
+
+    headers = {"Content-Type": "application/json"}
+    if OPENFIGI_API_KEY:
+        headers["X-OPENFIGI-APIKEY"] = OPENFIGI_API_KEY
+
+    url = OPENFIGI_BASE_URL + path
+    
+    response = requests.request(
+        method=method,
+        url=url,
+        headers=headers,
+        json=data
+    )
+    
+    response.raise_for_status()  # Exception if HTTP error
+    return response.json()
+
