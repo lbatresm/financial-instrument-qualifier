@@ -18,8 +18,8 @@ print("\n\nMapping response:", json.dumps(mapping_response, indent=2))
 # Example 2: Search for FIJIs using key words and other filters.
 #/v3/filter is better than /v3/search because it includes number of results.
 # Important: when the answer ends in 'next', read documentation on what to do.
-query = "APPLE"
-exchCode = "US"
+query = "BBG00NL1J164"
+# exchCode = "EU"
 
 search_request = {"query": query}
 search_response = api_call("/v3/filter", search_request)
