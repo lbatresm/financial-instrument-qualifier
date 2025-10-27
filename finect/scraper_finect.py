@@ -43,6 +43,15 @@ def scrape_fund_info(url: str, isin: str = "") -> Optional[Dict]:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         
+        # Save HTML for debugging (overwrite if exists)
+        debug_html_file = f"finect/debug_html_{isin}.html" if isin else "finect/debug_html.html"
+        try:
+            with open(debug_html_file, 'w', encoding='utf-8') as f:
+                f.write(response.text)
+            print(f"HTML saved to {debug_html_file}")
+        except Exception as e:
+            print(f"Warning: Could not save HTML: {e}")
+        
         # Extract INITIAL_STATE
         match = re.search(r'window.INITIAL_STATE="([^"]+)"', response.text)
         if not match:
@@ -52,6 +61,15 @@ def scrape_fund_info(url: str, isin: str = "") -> Optional[Dict]:
         # Decode URL encoded data
         decoded = unquote(match.group(1))
         data = json.loads(decoded)
+        
+        # Save INITIAL_STATE JSON for debugging (overwrite if exists)
+        initial_state_file = f"finect/initial_state_{isin}.json" if isin else "finect/initial_state.json"
+        try:
+            with open(initial_state_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print(f"INITIAL_STATE saved to {initial_state_file}")
+        except Exception as e:
+            print(f"Warning: Could not save INITIAL_STATE: {e}")
         
         # Extract fund information
         fund_data = extract_fund_data(data, isin)
@@ -78,11 +96,43 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
     # Extract management company
     mgmt_company = fund_model.get('managementCompany', {})
     
-    # Extract category
-    category = fund_model.get('category', {})
+    # Extract category (just name, not description)
+    category_name = fund_model.get('category', {}).get('name', 'N/A')
     
+    # Extract strategy statement
+    strategy = fund_model.get('strategy', {})
+    
+    # Extract Morningstar rating
+    ratings = fund_model.get('ratings', [])
+    morningstar_rating = None
+    for rating in ratings:
+        if rating.get('provider') == 'morningstar':
+            morningstar_rating = rating.get('value')
+            break
+
+    # Extract benchmark
+    benchmarks = fund_model.get('benchmarks', [])
+    benchmark_name = ""
+    if benchmarks and len(benchmarks) > 0:
+        benchmark_name = benchmarks[0].get('name', '')
+
+    # Extract availability in platforms
+    comparers = fund_model.get('comparer', [])
+    platform_names = []
+    if comparers and len(comparers) > 0:
+        for comparer in comparers:
+            platform_name = comparer.get('name', '')
+            if platform_name:
+                platform_names.append(platform_name)
+
+    # Extract currency
+    currency = fund_model.get('currency', {}).get('code', {})
+
+    # Extract number of classes of the fund
+    classes = fund_model.get('classes', [])  
+    num_classes = len(classes) if classes else 0
+
     # Extract fees/commissions from classes
-    classes = fund_model.get('classes', [])
     fee_data = {}
     if classes and len(classes) > 0:
         fees_obj = classes[0].get('fees', {})
@@ -101,25 +151,6 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         if fees_obj.get('ogc'):
             fee_data['ongoing_charge'] = fees_obj['ogc'].get('value', 0)
     
-    # Extract returns/performance
-    performance = fund_stats.get('performance', {})
-    returns_by_period = {}
-    if performance and performance.get('periods'):
-        for ret in performance['periods']:
-            period = ret.get('period', '')
-            value = ret.get('value')
-            if value is not None:
-                returns_by_period[period] = value
-    
-    # Extract volatility (standard deviation)
-    standard_deviation = fund_stats.get('standardDeviation', [])
-    volatility_by_period = {}
-    for vol in standard_deviation:
-        period = vol.get('period', '')
-        value = vol.get('value')
-        if value is not None:
-            volatility_by_period[period] = value
-    
     # Extract max drawdown
     max_drawdown = fund_stats.get('maxDrawdown', [])
     drawdown_by_period = {}
@@ -128,6 +159,15 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         value = dd.get('value')
         if value is not None:
             drawdown_by_period[period] = value
+
+    # Extract volatility (standard deviation)
+    standard_deviation = fund_stats.get('standardDeviation', [])
+    volatility_by_period = {}
+    for vol in standard_deviation:
+        period = vol.get('period', '')
+        value = vol.get('value')
+        if value is not None:
+            volatility_by_period[period] = value
     
     # Extract alpha
     alpha = fund_stats.get('alpha', [])
@@ -156,11 +196,44 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         if value is not None:
             sharpe_by_period[period] = value
     
-    # Extract benchmark
-    benchmarks = fund_model.get('benchmarks', [])
-    benchmark_name = ""
-    if benchmarks and len(benchmarks) > 0:
-        benchmark_name = benchmarks[0].get('name', '')
+    # Extract tracking error
+    tracking_error = fund_stats.get('trackingError', [])
+    tracking_error_by_period = {}
+    for te in tracking_error:
+        period = te.get('period', '')
+        value = te.get('value')
+        if value is not None:
+            tracking_error_by_period[period] = value
+    
+    # Extract correlation
+    correlation = fund_stats.get('correlation', [])
+    correlation_by_period = {}
+    for corr in correlation:
+        period = corr.get('period', '')
+        value = corr.get('value')
+        if value is not None:
+            correlation_by_period[period] = value
+    
+    # Extract R-squared (r2)
+    r2 = fund_stats.get('r2', [])
+    r2_by_period = {}
+    for r in r2:
+        period = r.get('period', '')
+        value = r.get('value')
+        if value is not None:
+            r2_by_period[period] = value
+
+    # Extract returns/performance (annualized only)
+    performance = fund_stats.get('performance', {})
+    returns_by_period = {}
+    if performance and performance.get('periods'):
+        for ret in performance['periods']:
+            # Filter only annualized returns, not accumulated
+            if ret.get('type') == 'annualized':
+                period = ret.get('period', '')
+                value = ret.get('value')
+                if value is not None:
+                    returns_by_period[period] = value
     
     # Extract current value
     current_value = ""
@@ -169,15 +242,49 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         if last_quote and last_quote.get('price'):
             current_value = f"{last_quote['price']:.2f}€"
     
+    # Extract breakdown data (asset allocation, market cap, regional exposure, stock sector)
+    breakdown_data = {}
+    breakdown = fund_model.get('breakdown', [])
+    if breakdown:
+        for b in breakdown:
+            breakdown_type = b.get('type')
+            items = b.get('items', [])
+            breakdown_data[breakdown_type] = []
+            for item in items:
+                drawer = item.get('drawer', '')
+                values = item.get('values', {})
+                long_val = values.get('long', 0)
+                if long_val > 0:  # Only include items with positive allocation
+                    breakdown_data[breakdown_type].append({
+                        'name': drawer,
+                        'value': long_val
+                    })
+
+    # Extract portfolio holdings (name and weight)
+    portfolio = fund_model.get('portfolio', {})
+    holdings_data = []
+    if portfolio and portfolio.get('holdings'):
+        for holding in portfolio['holdings']:
+            holding_name = holding.get('name', '')
+            holding_weight = holding.get('weight', 0)
+            if holding_name:
+                holdings_data.append({
+                    'name': holding_name,
+                    'weight': holding_weight
+                })
+
     # Build fund data
     fund_data = {
         'isin': isin,
         'name': fund_model.get('name', 'N/A'),
         'fund_manager': mgmt_company.get('name', 'N/A'),
-        'category': category.get('name', 'N/A'),
+        'category': category_name,
         'benchmark': benchmark_name,
         'value': current_value,
         'description': fund_model.get('description', ''),
+        'strategy': strategy if isinstance(strategy, str) else 'N/A',
+        'morningstar_rating': morningstar_rating,
+        'num_classes': num_classes,
         'fee': fee_data,
         'returns': returns_by_period,
         'volatility': volatility_by_period,
@@ -185,6 +292,11 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         'alpha': alpha_by_period,
         'beta': beta_by_period,
         'sharpe': sharpe_by_period,
+        'tracking_error': tracking_error_by_period,
+        'correlation': correlation_by_period,
+        'r2': r2_by_period,
+        'breakdown': breakdown_data,
+        'holdings': holdings_data,
     }
     
     return fund_data
@@ -220,8 +332,17 @@ def main():
         print(f"Name: {fund_data.get('name', 'N/A')}")
         print(f"Fund Manager: {fund_data.get('fund_manager', 'N/A')}")
         print(f"Category: {fund_data.get('category', 'N/A')}")
+        
         print(f"Benchmark: {fund_data.get('benchmark', 'N/A')}")
         print(f"Current Value: {fund_data.get('value', 'N/A')}")
+        
+        morningstar = fund_data.get('morningstar_rating')
+        if morningstar is not None:
+            print(f"Morningstar Rating: {morningstar}/5")
+        
+        num_classes = fund_data.get('num_classes')
+        if num_classes is not None:
+            print(f"Number of Classes: {num_classes}")
         
         print("\nFees:")
         fees = fund_data.get('fee', {})
@@ -254,8 +375,42 @@ def main():
             if value is not None:
                 print(f"  {period}: {value:.4f}")
         
+        print("\nTracking Error by Period:")
+        for period, value in fund_data.get('tracking_error', {}).items():
+            if value is not None:
+                print(f"  {period}: {value:.2f}")
+        
+        print("\nCorrelation by Period:")
+        for period, value in fund_data.get('correlation', {}).items():
+            if value is not None:
+                print(f"  {period}: {value:.2f}%")
+        
+        print("\nR-squared by Period:")
+        for period, value in fund_data.get('r2', {}).items():
+            if value is not None:
+                print(f"  {period}: {value:.2f}%")
+        
+        # Print breakdown data
+        breakdown = fund_data.get('breakdown', {})
+        if breakdown:
+            print("\nBreakdown:")
+            for breakdown_type, items in breakdown.items():
+                print(f"  {breakdown_type.replace('-', ' ').title()}:")
+                for item in items[:5]:  # Show top 5 items
+                    print(f"    {item['name']}: {item['value']:.2f}%")
+        
+        # Print holdings
+        holdings = fund_data.get('holdings', [])
+        if holdings:
+            print(f"\nTop Holdings ({len(holdings)} total):")
+            for holding in holdings[:10]:  # Show top 10 holdings
+                if isinstance(holding, dict):
+                    print(f"  - {holding.get('name', 'N/A')}: {holding.get('weight', 0):.2f}%")
+                else:
+                    print(f"  - {holding}")
+        
         # Save to JSON
-        save_to_json(fund_data, f'fund_{isin}.json')
+        save_to_json(fund_data, f'finect/fund_{isin}.json')
         
     else:
         print("Failed to retrieve fund information")
