@@ -128,11 +128,8 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
     # Extract currency
     currency = fund_model.get('currency', {}).get('code', {})
 
-    # Extract number of classes of the fund
-    classes = fund_model.get('classes', [])  
-    num_classes = len(classes) if classes else 0
-
     # Extract fees/commissions from classes
+    classes = fund_model.get('classes', [])  
     fee_data = {}
     if classes and len(classes) > 0:
         fees_obj = classes[0].get('fees', {})
@@ -284,7 +281,6 @@ def extract_fund_data(data: Dict, isin: str = "") -> Dict:
         'description': fund_model.get('description', ''),
         'strategy': strategy if isinstance(strategy, str) else 'N/A',
         'morningstar_rating': morningstar_rating,
-        'num_classes': num_classes,
         'fee': fee_data,
         'returns': returns_by_period,
         'volatility': volatility_by_period,
